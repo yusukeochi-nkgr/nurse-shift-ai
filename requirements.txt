@@ -1,3 +1,4 @@
 streamlit
 pulp
 pandas
+st-gsheets-connection
