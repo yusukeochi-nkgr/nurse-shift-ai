@@ -4,6 +4,7 @@ import numpy as np
 import io
 import openpyxl
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.utils import get_column_letter
 import pulp
 from datetime import datetime, timedelta
 from dateutil.relativedelta import relativedelta
@@ -13,23 +14,7 @@ import time
 # ==========================================
 # 共通デザイン・セッション初期化
 # ==========================================
-st.set_page_config(
-    page_title="Strategic Nurse Staffing Platform", 
-    layout="wide",
-    menu_items={
-        'Get Help': None,
-        'Report a bug': None,
-        'About': None
-    }
-)
-
-# 🚨 さらに念押しで、CSSを使って右上のメニューボタン(⋮)自体を透明にして完全に隠す
-st.markdown("""
-    <style>
-    #MainMenu {visibility: hidden;}
-    header {visibility: hidden;}
-    </style>
-""", unsafe_allow_html=True)
+st.set_page_config(page_title="Strategic Nurse Staffing Platform", layout="wide")
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; color: #333333; }
@@ -148,12 +133,53 @@ def create_excel_download(shift_data, ward_list, days, staff_df, score_map):
 def generate_excel_with_validation(org_df, staff_df):
     output = io.BytesIO()
     wb = openpyxl.Workbook()
+    
+    # 組織マスタの出力
     ws_org = wb.active; ws_org.title = "組織構造マスタ"
     ws_org.append(org_df.columns.tolist())
     for r in org_df.values.tolist(): ws_org.append(r)
+    
+    # 職員マスタの出力（Date型の文字列表現への変換）
     ws_staff = wb.create_sheet(title="職員台帳マスタ")
-    ws_staff.append(staff_df.columns.tolist())
-    for r in staff_df.values.tolist(): ws_staff.append(r)
+    df_out = staff_df.copy()
+    for col in ["生年月日", "入職年月日", "末子生年月日"]:
+        if col in df_out.columns:
+            df_out[col] = df_out[col].dt.strftime('%Y-%m-%d') if pd.api.types.is_datetime64_any_dtype(df_out[col]) else df_out[col].astype(str)
+            df_out[col] = df_out[col].replace('NaT', '')
+            
+    ws_staff.append(df_out.columns.tolist())
+    for r in df_out.values.tolist(): ws_staff.append(r)
+    
+    # 🚨 UIと連動したプルダウン（入力規則）の生成
+    fac_list = org_df["施設名"].dropna().unique().tolist() if not org_df.empty else ["新宿本院"]
+    war_list = org_df["病棟名"].dropna().unique().tolist() if not org_df.empty else []
+    
+    dv_fac = DataValidation(type="list", formula1=f'"{",".join(fac_list)}"' if fac_list else '" "', allow_blank=True)
+    dv_war = DataValidation(type="list", formula1=f'"{",".join(war_list)}"' if war_list else '" "', allow_blank=True)
+    dv_emp = DataValidation(type="list", formula1='"常勤,短時間,非常勤"', allow_blank=True)
+    dv_rnk = DataValidation(type="list", formula1='"S（超指導）,A（指導）,B（自立）,C（支援）"', allow_blank=True)
+    dv_bool = DataValidation(type="list", formula1='"True,False"', allow_blank=True)
+    dv_rhy = DataValidation(type="list", formula1='"おまかせ,2連休ベース,1日休みベース"', allow_blank=True)
+    dv_gen = DataValidation(type="list", formula1='"女,男"', allow_blank=True)
+    dv_mar = DataValidation(type="list", formula1='"既婚,未婚"', allow_blank=True)
+    
+    ws_staff.add_data_validation(dv_fac); ws_staff.add_data_validation(dv_war)
+    ws_staff.add_data_validation(dv_emp); ws_staff.add_data_validation(dv_rnk)
+    ws_staff.add_data_validation(dv_bool); ws_staff.add_data_validation(dv_rhy)
+    ws_staff.add_data_validation(dv_gen); ws_staff.add_data_validation(dv_mar)
+    
+    cols = df_out.columns.tolist()
+    def apply_dv(dv, col_name):
+        if col_name in cols:
+            col_idx = cols.index(col_name) + 1
+            col_letter = get_column_letter(col_idx)
+            dv.add(f'{col_letter}2:{col_letter}1000')
+
+    apply_dv(dv_fac, "所属施設"); apply_dv(dv_war, "所属病棟")
+    apply_dv(dv_emp, "雇用形態"); apply_dv(dv_rnk, "スキルランク")
+    apply_dv(dv_bool, "夜勤可否"); apply_dv(dv_bool, "夜勤専従"); apply_dv(dv_bool, "3連休希望")
+    apply_dv(dv_rhy, "休みのリズム"); apply_dv(dv_gen, "性別"); apply_dv(dv_mar, "既婚_未婚")
+    
     wb.save(output)
     return output.getvalue()
 
@@ -296,6 +322,7 @@ if page == "1. 組織・人員マスタ管理":
     st.session_state.staff_df = edited_staff_df
     
     if not st.session_state.org_df.empty and not edited_staff_df.empty:
+        # 🚨 Excelダウンロード時にもプルダウンリストが適用される
         excel_data = generate_excel_with_validation(st.session_state.org_df, edited_staff_df)
         st.download_button("📥 保存：統合マスタ出力（.xlsx）", data=excel_data, file_name="integrated_master.xlsx", use_container_width=True)
 
@@ -684,7 +711,6 @@ elif page == "4. 統合最適化＆応援調整":
                 st.markdown(f"**■ {w_name}**")
                 df_prev = pd.DataFrame(s_matrix).T
                 df_prev.columns = [f"{c}日" for c in df_prev.columns]
-                # 🚨 DataFrameのスタイル指定に、非推奨のapplymapではなくmapを使用
                 st.dataframe(df_prev.style.map(color_shift_cells), use_container_width=True)
             
             excel_base = create_excel_download(st.session_state.base_shifts, ward_list, days, staff_df, score_map)
@@ -782,7 +808,6 @@ elif page == "4. 統合最適化＆応援調整":
                     st.markdown(f"**■ {w_name}**")
                     df_final_prev = pd.DataFrame(s_matrix).T
                     df_final_prev.columns = [f"{c}日" for c in df_final_prev.columns]
-                    # 🚨 DataFrameのスタイル指定に、非推奨のapplymapではなくmapを使用
                     st.dataframe(df_final_prev.style.map(color_shift_cells), use_container_width=True)
 
                 excel_final = create_excel_download(st.session_state.final_shifts, ward_list, days, staff_df, score_map)
@@ -986,10 +1011,12 @@ elif page == "6. 将来戦力・マクロ推計 (SWP)":
 
         st.divider()
         st.subheader("⚙️ ステップ2：シミュレーション設定（育成・復帰・新卒補充・定年ルール）")
+        
+        # 🚨 UI改善：昇格目安を0.5単位で入力可能に
         c_sim1, c_sim2, c_sim3, c_sim4, c_sim5, c_sim6 = st.columns(6)
-        c_to_b = c_sim1.number_input("C→B 昇格目安(年)", value=3, min_value=1)
-        b_to_a = c_sim2.number_input("B→A 昇格目安(年)", value=5, min_value=1)
-        a_to_s = c_sim3.number_input("A→S 昇格目安(年)", value=10, min_value=1)
+        c_to_b = c_sim1.number_input("C→B 昇格目安(年)", value=3.0, min_value=0.5, step=0.5, format="%.1f")
+        b_to_a = c_sim2.number_input("B→A 昇格目安(年)", value=5.0, min_value=0.5, step=0.5, format="%.1f")
+        a_to_s = c_sim3.number_input("A→S 昇格目安(年)", value=10.0, min_value=0.5, step=0.5, format="%.1f")
         leave_rank_down = c_sim4.number_input("休職復帰 ランクダウン(月)", value=6, min_value=0)
         annual_new_grad_count = c_sim5.number_input("毎年4月のCクラス補充(名)", value=3, min_value=0)
         retire_age = c_sim6.number_input("定年退職年齢", value=60, min_value=50, max_value=75)
@@ -1002,7 +1029,7 @@ elif page == "6. 将来戦力・マクロ推計 (SWP)":
                 has_marry_data = True
         
         st.divider()
-        st.subheader("📊 産休予測ロジック解説")
+        st.subheader("📊 産休・復帰予測ロジック解説")
         if has_marry_data:
             st.success("✔ マスタ内に「結婚年月」が検出されたため、高度な『カプラン・マイヤー法（経過年数分析）』を適用してシミュレーションします。")
             with st.expander("💡 【用語解説】カプラン・マイヤー法（経過年数分析）とは？", expanded=False):
@@ -1018,6 +1045,14 @@ elif page == "6. 将来戦力・マクロ推計 (SWP)":
                 データが空欄の場合、AIは年齢と性別の統計確率をベースにしつつ、マスタの「既婚」フラグを持つスタッフに対しては産休突入のサイコロの目を独自の傾斜ロジックで変動させて未来を予測します。
                 （※具体的な重み付けの補正倍率は企業秘密となっております）。
                 """)
+
+        st.markdown("""
+        **■ 産休・育休からの復帰ロジック（案A：就学前時短モデル）**
+        AIは産休に入ったスタッフに対し、以下の実態に即したサイクルを自動で適用します。
+        1. **0〜1歳（12ヶ月間）:** 完全休業（FTE = 0.0）
+        2. **1歳〜小学校入学:** 時短勤務として復帰（FTE = 0.75 もしくは元の契約時間）
+        3. **小学校入学（満6歳を迎えた次の4月）:** フルタイム勤務へ復帰（FTE = 1.0）
+        """)
 
         st.divider()
         st.subheader("🚀 ステップ3：未来予測の実行")
@@ -1055,9 +1090,12 @@ elif page == "6. 将来戦力・マクロ推計 (SWP)":
                     for k, v in rank_str_map.items():
                         if v == row["スキルランク"]: r_val = k
                         
+                    o_fte = safe_num(row["月間契約時間(h)"], 160) / 160.0
+                    
                     sim_population.append({
                         "is_active": True, "birth_date": b_date, "child_birth": c_birth, "marry_date": m_date,
-                        "gender": row["性別"], "married": row["既婚_未婚"], "base_fte": safe_num(row["月間契約時間(h)"], 160) / 160.0,
+                        "gender": row["性別"], "married": row["既婚_未婚"], 
+                        "original_fte": o_fte, "base_fte": o_fte,
                         "current_rank": r_val, "leave_timer": 0, "return_timer": 0,
                         "rank_tenure_months": 0 
                     })
@@ -1070,7 +1108,8 @@ elif page == "6. 将来戦力・マクロ推計 (SWP)":
                         for _ in range(int(annual_new_grad_count)):
                             sim_population.append({
                                 "is_active": True, "birth_date": current_date - relativedelta(years=22),
-                                "child_birth": None, "marry_date": None, "gender": "女", "married": "未婚", "base_fte": 1.0,
+                                "child_birth": None, "marry_date": None, "gender": "女", "married": "未婚", 
+                                "original_fte": 1.0, "base_fte": 1.0,
                                 "current_rank": 1, "leave_timer": 0, "return_timer": 0,
                                 "rank_tenure_months": 0
                             })
@@ -1085,10 +1124,15 @@ elif page == "6. 将来戦力・マクロ推計 (SWP)":
                         if m > 0 and m % 12 == 0 and np.random.rand() < learned_turnover_rate: 
                             event_counts[c_str]["定年・自己都合退職"] += 1; p["is_active"] = False; continue
                         
+                        # 🚨 休業タイマーと時短復帰ロジック（案A）
                         if p["leave_timer"] > 0:
                             p["leave_timer"] -= 1
-                            if p["leave_timer"] == 0: p["return_timer"] = leave_rank_down
-                            continue
+                            if p["leave_timer"] == 0: 
+                                p["return_timer"] = leave_rank_down
+                                # 1年の休業が明けて時短復帰（0.75または元のFTEの小さい方）
+                                p["base_fte"] = min(0.75, p["original_fte"])
+                                event_counts[c_str]["育休・時短復帰(増)"] += 1
+                            continue # 休業中（FTEゼロ扱い）のためスキップ
                             
                         target_maternity_prob = learned_maternity_rate
                         
@@ -1105,13 +1149,23 @@ elif page == "6. 将来戦力・マクロ推計 (SWP)":
                             if np.random.rand() < target_maternity_prob:
                                 event_counts[c_str]["産休・育休離脱"] += 1
                                 p["leave_timer"] = 12
-                                if m + 12 <= months: event_counts[timeline_str[m+12]]["育休・時短復帰(増)"] += 1
+                                p["child_birth"] = current_date
+                                p["base_fte"] = 0.0 # 休業突入
                                 continue
                             
-                        if p["child_birth"] and p["base_fte"] < 1.0:
-                            child_age = current_date.year - p["child_birth"].year
-                            if child_age == 3 and current_date.month == 4: 
-                                event_counts[c_str]["育休・時短復帰(増)"] += 1; p["base_fte"] = 1.0
+                        # 🚨 小学校入学（フルタイム復帰）判定
+                        if p["child_birth"] is not None and p["base_fte"] < p["original_fte"]:
+                            # 誕生日の年度（4月始まり）を計算
+                            b_year = p["child_birth"].year
+                            if p["child_birth"].month <= 3:
+                                b_year -= 1
+                            
+                            # 小学校入学は、誕生年度の7年後の4月
+                            school_entry_year = b_year + 7
+                            
+                            if current_date.year == school_entry_year and current_date.month == 4: 
+                                event_counts[c_str]["育休・時短復帰(増)"] += 1
+                                p["base_fte"] = p["original_fte"]
 
                         actual_rank = p["current_rank"]
                         if p["return_timer"] > 0:
@@ -1131,6 +1185,7 @@ elif page == "6. 将来戦力・マクロ推計 (SWP)":
             st.subheader(f"📊 将来のスキルミックス（階層別 FTE推移：採用補充あり）")
             df_line = pd.DataFrame(fte_history, index=timeline_str)
             
+            # 🚨 修正：KeyErrorを防ぐために変数リストで確実な名前を使用
             safe_cols = [rank_str_map[1], rank_str_map[2], rank_str_map[3], rank_str_map[4]]
             df_line = df_line[safe_cols]
             
