@@ -14,7 +14,23 @@ import time
 # ==========================================
 # 共通デザイン・セッション初期化
 # ==========================================
-st.set_page_config(page_title="Strategic Nurse Staffing Platform", layout="wide")
+st.set_page_config(
+    page_title="Strategic Nurse Staffing Platform", 
+    layout="wide",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': None
+    }
+)
+
+# 🚨 さらに念押しで、CSSを使って右上のメニューボタン(⋮)自体を透明にして完全に隠す
+st.markdown("""
+    <style>
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    </style>
+""", unsafe_allow_html=True)
 st.markdown("""
     <style>
     .main { background-color: #f8f9fa; color: #333333; }
