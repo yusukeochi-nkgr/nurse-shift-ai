@@ -37,7 +37,6 @@ if "org_df" not in st.session_state:
 if "staff_df" not in st.session_state:
     st.session_state.staff_df = pd.DataFrame(columns=["職員ID", "氏名", "所属施設", "所属病棟", "雇用形態", "月間契約時間(h)", "スキルランク", "夜勤可否", "夜勤上限回数", "月間公休数(非常勤用)", "夜勤専従", "休みのリズム", "3連休希望", "生年月日", "入職年月日", "性別", "既婚_未婚", "結婚年月", "末子生年月日"])
 else:
-    # 古いキャッシュが残っている場合の互換性維持（エラー回避）
     if "休みのリズム" not in st.session_state.staff_df.columns:
         st.session_state.staff_df["休みのリズム"] = "おまかせ"
     if "3連休希望" not in st.session_state.staff_df.columns:
@@ -76,7 +75,6 @@ def parse_dates(date_str):
     try: return [int(d.strip()) for d in str(date_str).split(",") if d.strip().isdigit()]
     except: return []
 
-# 🚨 未設定の病棟に自動で初期設定を適用する関数
 def ensure_ward_settings(ward_list, staff_df):
     for w in ward_list:
         if w not in st.session_state.ward_settings:
@@ -158,7 +156,6 @@ def generate_dummy_master():
             night_ok = True if (i <= 22) else False
             night_only = True if (23 <= i <= 24) else False 
             
-            # Noneを使って明示的に空白を処理（エラー防止）
             night_limit = 9 if night_only else (4 if rank in ["S（超指導）", "A（指導）"] and night_ok else (5 if night_ok else None))
             
             rhythm = np.random.choice(["おまかせ", "2連休ベース", "1日休みベース"], p=[0.6, 0.3, 0.1])
@@ -183,7 +180,6 @@ def generate_dummy_master():
             
             staff_data.append([f"1{wards.index(w)}{i:03d}", f"{w[:1]}_{i:02d}号", "新宿本院", w, emp, hours, rank, night_ok, night_limit, off_days, night_only, rhythm, want_3days, birth_date, join_date, gender, married, marry_date_str, child_birth])
             
-    # 確実に列をマッピングしてクラッシュを防ぐ
     staff_cols = ["職員ID", "氏名", "所属施設", "所属病棟", "雇用形態", "月間契約時間(h)", "スキルランク", "夜勤可否", "夜勤上限回数", "月間公休数(非常勤用)", "夜勤専従", "休みのリズム", "3連休希望", "生年月日", "入職年月日", "性別", "既婚_未婚", "結婚年月", "末子生年月日"]
     return pd.DataFrame(org_data, columns=st.session_state.org_df.columns), pd.DataFrame(staff_data, columns=staff_cols)
 
@@ -355,7 +351,6 @@ elif page == "3. 現場制約・希望入力":
         sel_ward = st.selectbox("▶ 設定する病棟を選択", ward_list)
         st.divider()
         
-        # 🚨 初期設定が未保存の場合は自動でセットアップ
         ensure_ward_settings(ward_list, staff_df)
         
         w_staff = staff_df[staff_df["所属病棟"] == sel_ward]
@@ -388,8 +383,6 @@ elif page == "3. 現場制約・希望入力":
                 
         st.divider()
         st.subheader(f"1. スキルミックス ＆ 人数要件（{sel_ward}）")
-        
-        # 🚨 UI改善：スコア換算の明記
         st.info("💡 スコア配分： S（超指導）= 3.0点、 A（指導）= 2.0点、 B（自立）= 1.0点、 C（支援）= 0.5点")
         
         c_wk, c_we = st.columns(2)
@@ -441,7 +434,6 @@ elif page == "4. 統合最適化＆応援調整":
         days = list(range(1, sim_days + 1)); num_holidays = len(weekends)
         ward_list = org_df["病棟名"].dropna().unique().tolist()
         
-        # 🚨 AI実行前に未設定の病棟へ初期設定を自動適用
         ensure_ward_settings(ward_list, staff_df)
         ws_dict = st.session_state.ward_settings
         
@@ -676,7 +668,8 @@ elif page == "4. 統合最適化＆応援調整":
                 st.markdown(f"**■ {w_name}**")
                 df_prev = pd.DataFrame(s_matrix).T
                 df_prev.columns = [f"{c}日" for c in df_prev.columns]
-                st.dataframe(df_prev.style.applymap(color_shift_cells), use_container_width=True)
+                # 🚨 DataFrameのスタイル指定に、非推奨のapplymapではなくmapを使用
+                st.dataframe(df_prev.style.map(color_shift_cells), use_container_width=True)
             
             excel_base = create_excel_download(st.session_state.base_shifts, ward_list, days, staff_df, score_map)
             st.download_button("📥 STEP1: ベースシフト表ダウンロード", data=excel_base, file_name="Base_Shifts.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
@@ -773,7 +766,8 @@ elif page == "4. 統合最適化＆応援調整":
                     st.markdown(f"**■ {w_name}**")
                     df_final_prev = pd.DataFrame(s_matrix).T
                     df_final_prev.columns = [f"{c}日" for c in df_final_prev.columns]
-                    st.dataframe(df_final_prev.style.applymap(color_shift_cells), use_container_width=True)
+                    # 🚨 DataFrameのスタイル指定に、非推奨のapplymapではなくmapを使用
+                    st.dataframe(df_final_prev.style.map(color_shift_cells), use_container_width=True)
 
                 excel_final = create_excel_download(st.session_state.final_shifts, ward_list, days, staff_df, score_map)
                 st.download_button("📥 STEP2: 最終統合シフト表をダウンロード（Excel）", data=excel_final, file_name="Integrated_Final_Shifts.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", use_container_width=True)
@@ -789,7 +783,6 @@ elif page == "5. 最適定数 ギャップ分析(What-if)":
     org_df, staff_df = st.session_state.org_df, st.session_state.staff_df
     ward_list = org_df["病棟名"].dropna().unique().tolist() if not org_df.empty else []
     
-    # 🚨 AI実行前に未設定病棟へ初期設定を自動適用
     ensure_ward_settings(ward_list, staff_df)
     ws_dict = st.session_state.ward_settings
     
@@ -1122,7 +1115,6 @@ elif page == "6. 将来戦力・マクロ推計 (SWP)":
             st.subheader(f"📊 将来のスキルミックス（階層別 FTE推移：採用補充あり）")
             df_line = pd.DataFrame(fte_history, index=timeline_str)
             
-            # 🚨 修正：KeyErrorを防ぐために変数リストで確実な名前を使用
             safe_cols = [rank_str_map[1], rank_str_map[2], rank_str_map[3], rank_str_map[4]]
             df_line = df_line[safe_cols]
             
