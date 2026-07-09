@@ -14,9 +14,25 @@ import time
 # ==========================================
 # 共通デザイン・セッション初期化
 # ==========================================
-st.set_page_config(page_title="Strategic Nurse Staffing Platform", layout="wide")
+st.set_page_config(
+    page_title="Strategic Nurse Staffing Platform", 
+    layout="wide",
+    menu_items={
+        'Get Help': None,
+        'Report a bug': None,
+        'About': None
+    }
+)
+
 st.markdown("""
     <style>
+    #MainMenu {visibility: hidden;}
+    header {visibility: hidden;}
+    footer {visibility: hidden;}
+    div[data-testid="stToolbar"] {visibility: hidden;}
+    button[title="View menu"] {visibility: hidden;}
+    .stDeployButton {display:none;}
+    
     .main { background-color: #f8f9fa; color: #333333; }
     h1, h2, h3 { font-family: 'Helvetica Neue', Arial, sans-serif; color: #111111; font-weight: 600; }
     div.stButton > button { background-color: #333333; color: #ffffff; border-radius: 2px; border: none; padding: 0.5rem 1rem; font-weight: bold; }
@@ -570,13 +586,18 @@ elif page == "4. 統合最適化＆応援調整":
                         alert_100k.append((s_6d, f"【安全違反】{i}さんが{j}日から6連勤以上になっています"))
                     
                     row_p = pref[pref["氏名"]==i].iloc[0] if len(pref[pref["氏名"]==i])>0 else None
+                    
+                    # 🚨有休希望日を記録するためのリストを用意
+                    yq_list = [] 
+                    
                     if row_p is not None:
                         if row_p.get("前月最終日") == "明": prob += x[i][1]["休"] + x[i][1]["有"] == 1; prob += x[i][1]["明"] == 0
                         elif row_p.get("前月最終日") == "入": prob += x[i][1]["明"] == 1
                         else: prob += x[i][1]["明"] == 0
                         
-                        yq = parse_dates(row_p.get("有休希望(日付)",""))
-                        for d in yq: 
+                        # 有休希望日を取得し、その日は「有」を確定させる
+                        yq_list = parse_dates(row_p.get("有休希望(日付)",""))
+                        for d in yq_list: 
                             if d in days: prob += x[i][d]["有"] == 1
                             
                         kq = parse_dates(row_p.get("希望休(日付)",""))
@@ -597,6 +618,10 @@ elif page == "4. 統合最適化＆応援調整":
                             prob += x[i][sim_days]["夜"] <= s_n2
                             obj.append(500 * s_n2)
                             alert_500.append((s_n2, f"【希望未達】{i}さんの次月2日の希望が反映されていません"))
+
+                    for j in days:
+                        if j not in yq_list:
+                            prob += x[i][j]["有"] == 0
 
                     rhythm = w_staff[w_staff["氏名"]==i]["休みのリズム"].values[0] if "休みのリズム" in w_staff.columns else "おまかせ"
                     want_3days = w_staff[w_staff["氏名"]==i]["3連休希望"].values[0] if "3連休希望" in w_staff.columns else False
